@@ -43,3 +43,4 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 });
+update app.ja
