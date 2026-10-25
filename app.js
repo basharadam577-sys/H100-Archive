@@ -1,6 +1,8 @@
 
 document.addEventListener('DOMContentLoaded', () => {
-  const KEY = 'h100_archive_items';
+  const SUPABASE_URL = 'https://srcdhvfhikxignvmuhha.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_WWUjfhvOMvIeoRJbo9y59Q_EnaS_UCY';
+  const TABLE_URL = `${SUPABASE_URL}/rest/v1/archive_items`;
 
   const form = document.getElementById('form');
   const titleInput = document.getElementById('title');
@@ -9,19 +11,34 @@ document.addEventListener('DOMContentLoaded', () => {
   const dateInput = document.getElementById('date');
   const list = document.getElementById('list');
   const search = document.getElementById('search');
+  const categoryInput = document.getElementById('category');
+  const imageInput = document.getElementById('image_url');
 
   if (!form || !titleInput || !detailsInput || !list || !search) {
-    alert('خطأ: بعض عناصر الصفحة غير موجودة.');
+    alert('تعذر العثور على عناصر الصفحة المطلوبة.');
     return;
   }
 
-  function getItems() {
-    try {
-      const items = JSON.parse(localStorage.getItem(KEY) || '[]');
-      return Array.isArray(items) ? items : [];
-    } catch (error) {
-      return [];
+  let items = [];
+
+  async function request(path = '', options = {}) {
+    const response = await fetch(TABLE_URL + path, {
+      ...options,
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        ...options.headers
+      }
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || `HTTP ${response.status}`);
     }
+
+    if (response.status === 204) return null;
+    return response.json();
   }
 
   function escapeHTML(value) {
@@ -37,84 +54,115 @@ document.addEventListener('DOMContentLoaded', () => {
   function render() {
     const query = search.value.trim().toLowerCase();
 
-    const items = getItems().filter(item =>
-      `${item.title} ${item.details}`.toLowerCase().includes(query)
+    const filtered = items.filter(item =>
+      `${item.title} ${item.content} ${item.category}`
+        .toLowerCase().includes(query)
     );
 
     list.innerHTML = '';
 
-    if (items.length === 0) {
-      list.textContent = 'لا توجد توثيقات محفوظة تطابق البحث.';
+    if (!filtered.length) {
+      list.textContent = 'لا توجد توثيقات تطابق البحث.';
       return;
     }
 
-    items.forEach(item => {
+    filtered.forEach(item => {
       const card = document.createElement('article');
       card.className = 'item';
 
+      const date = item.created_at
+        ? new Date(item.created_at).toLocaleDateString('ar')
+        : '';
+
+      const image = item.image_url
+        ? `<p><a href="${escapeHTML(item.image_url)}" target="_blank" rel="noopener">عرض الصورة</a></p>`
+        : '';
+
+      const source = item.source_url
+        ? `<p><a href="${escapeHTML(item.source_url)}" target="_blank" rel="noopener">🔗 فتح المصدر</a></p>`
+        : '';
+
       card.innerHTML = `
         <h3>${escapeHTML(item.title)}</h3>
-        <div class="meta">📅 ${escapeHTML(item.date)}</div>
-        <div>${escapeHTML(item.details).replace(/\n/g, '<br>')}</div>
-        ${item.source
-          ? `<p><a href="${escapeHTML(item.source)}"
-               target="_blank" rel="noopener">🔗 فتح المصدر</a></p>`
-          : ''}
-        <button type="button" data-delete="${escapeHTML(item.id)}">
-          حذف
-        </button>
+        <div class="meta">
+          ${escapeHTML(item.category || 'عام')}
+          ${date ? ' · 📅 ' + escapeHTML(date) : ''}
+        </div>
+        <div>${escapeHTML(item.content).replace(/\n/g, '<br>')}</div>
+        ${source}
+        ${image}
       `;
 
       list.appendChild(card);
     });
   }
 
-  form.addEventListener('submit', event => {
-    event.preventDefault();
+  async function loadItems() {
+    list.textContent = 'جارٍ تحميل التوثيقات...';
 
     try {
-      const title = titleInput.value.trim();
-      const details = detailsInput.value.trim();
-
-      if (!title || !details) {
-        alert('اكتب عنوان التوثيق والتفاصيل أولاً.');
-        return;
-      }
-
-      const item = {
-        id: Date.now().toString(),
-        title,
-        details,
-        source: sourceInput ? sourceInput.value.trim() : '',
-        date: dateInput && dateInput.value
-          ? dateInput.value
-          : new Date().toISOString().slice(0, 10)
-      };
-
-      const items = getItems();
-      items.unshift(item);
-
-      localStorage.setItem(KEY, JSON.stringify(items));
+      items = await request(
+        '?select=id,title,content,category,source_url,image_url,created_at&order=created_at.desc'
+      );
       render();
-      alert('تم حفظ التوثيق على هذا الجهاز بنجاح ✅');
+    } catch (error) {
+      console.error('H100 load error:', error);
+      list.textContent =
+        'تعذر تحميل التوثيقات من قاعدة البيانات. تحقق من الاتصال وسياسات Supabase.';
+    }
+  }
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+
+    const title = titleInput.value.trim();
+    const content = detailsInput.value.trim();
+
+    if (!title || !content) {
+      alert('اكتب عنوان التوثيق والتفاصيل أولاً.');
+      return;
+    }
+
+    const item = {
+      title,
+      content,
+      category: categoryInput?.value.trim() || 'عام',
+      source_url: sourceInput?.value.trim() || '',
+      image_url: imageInput?.value.trim() || ''
+    };
+
+    if (dateInput?.value) {
+      item.created_at = new Date(
+        dateInput.value + 'T12:00:00Z'
+      ).toISOString();
+    }
+
+    const submitButton = form.querySelector(
+      'button[type="submit"], button:not([type])'
+    );
+
+    if (submitButton) submitButton.disabled = true;
+
+    try {
+      await request('', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify(item)
+      });
+
+      alert('تم حفظ التوثيق في قاعدة بيانات H100 Archive بنجاح ✅');
       form.reset();
+      await loadItems();
     } catch (error) {
       console.error('H100 save error:', error);
-      alert('تعذر الحفظ. تحقق من مساحة التخزين ثم حاول مرة أخرى.');
+      alert(
+        'لم يتم الحفظ في Supabase. تحقق من سياسات INSERT وSELECT، ثم راجع Console للأخطاء.'
+      );
+    } finally {
+      if (submitButton) submitButton.disabled = false;
     }
   });
 
-  list.addEventListener('click', event => {
-    const button = event.target.closest('[data-delete]');
-    if (!button) return;
-
-    const id = button.dataset.delete;
-    const remaining = getItems().filter(item => item.id !== id);
-
-    localStorage.setItem(KEY, JSON.stringify(remaining));
-    render();
-  });
-
   search.addEventListener('input', render);
-  render();
+  loadItems();
 });
