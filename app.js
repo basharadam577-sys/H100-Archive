@@ -124,19 +124,36 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  async function loadItems() {
-    list.textContent = 'جارٍ تحميل التوثيقات...';
 
-    try {
-      items = await request(
-        '?select=id,title,content,category,source_url,image_url,created_at&order=created_at.desc'
-      );
-      render();
-    } catch (error) {
-      console.error('H100 load error:', error);
-      list.textContent = 'تعذر تحميل التوثيقات. تحقق من الاتصال وصلاحيات قاعدة البيانات.';
+async function request(path = '', options = {}) {
+  const response = await fetch(TABLE_URL + path, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      ...options.headers
     }
+  });
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `HTTP ${response.status}: ${responseText || 'استجابة فارغة من الخادم'}`
+    );
   }
+
+  if (!responseText.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(responseText);
+  } catch (error) {
+    throw new Error('الخادم أرسل بيانات غير صالحة بصيغة JSON.');
+  }
+}
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
